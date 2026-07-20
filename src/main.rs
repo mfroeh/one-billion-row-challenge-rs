@@ -3,8 +3,9 @@ use std::{
     ffi::c_void,
     fs::File,
     io::{Error, Write},
+    ops::Range,
     os::{fd::AsRawFd, unix::fs::MetadataExt},
-    panic, slice,
+    panic, slice, thread,
 };
 
 use libc::{MAP_FAILED, MAP_HUGE_1GB, MAP_PRIVATE, PROT_READ};
@@ -27,6 +28,13 @@ impl Statistics {
 
     fn complete(self) -> (f64, f64, f64) {
         (self.min, (self.sum / self.count as f64), self.max)
+    }
+
+    fn merge_with(&mut self, other: Statistics) {
+        self.min = self.min.min(other.min);
+        self.max = self.max.max(other.max);
+        self.sum += other.sum;
+        self.count += other.count;
     }
 }
 
@@ -51,12 +59,49 @@ fn main() {
     let mapped_bytes = unsafe { slice::from_raw_parts(map_addr, size) };
     let string = unsafe { str::from_utf8_unchecked(mapped_bytes) };
 
-    let mut cities: HashMap<&str, Statistics> = HashMap::new();
-    for line in string.lines() {
-        let (city, temp) = line.split_once(";").unwrap();
-        let measurement: f64 = temp.parse().unwrap();
-        cities.entry(city).or_default().add(measurement);
+    let chunk_count: usize = thread::available_parallelism().unwrap().get();
+    let chunk_size = size / chunk_count;
+
+    let mut chunks: Vec<Range<usize>> = Vec::new();
+    let mut start = 0;
+    for _ in 0..chunk_count {
+        let exact_end = string.ceil_char_boundary(start + chunk_size);
+        let end = string[exact_end..]
+            .find('\n')
+            .map(|e| e + exact_end)
+            // it is always possible that exact_end hits the very last line
+            .unwrap_or(size);
+        chunks.push(start..end);
+        start = end + 1;
     }
+    // last chunk gets the remainder of the work
+    chunks.last_mut().unwrap().end = size;
+
+    let cities = thread::scope(|scope| {
+        let handles: Vec<_> = chunks
+            .into_iter()
+            .map(|chunk| {
+                scope.spawn(|| {
+                    let mut cities: HashMap<&str, Statistics> = HashMap::new();
+                    for line in string[chunk].lines() {
+                        let (city, temp) = line.split_once(";").expect(line);
+                        let measurement: f64 = temp.parse().unwrap();
+                        cities.entry(city).or_default().add(measurement);
+                    }
+                    cities
+                })
+            })
+            .collect();
+
+        let mut merged: HashMap<&str, Statistics> = HashMap::new();
+        for h in handles {
+            let chunk_result = h.join().unwrap();
+            for (k, v) in chunk_result {
+                merged.entry(k).or_default().merge_with(v);
+            }
+        }
+        merged
+    });
 
     write!(std::io::stdout(), "{{").unwrap();
     cities.into_iter().enumerate().for_each(|(i, (city, s))| {
