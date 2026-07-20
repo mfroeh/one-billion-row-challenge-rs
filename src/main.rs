@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{Read, Write},
+    io::{IoSliceMut, Read, Write},
     mem::ManuallyDrop,
     os::unix::fs::MetadataExt,
 };
@@ -30,11 +30,23 @@ impl Statistics {
 fn main() {
     let mut file = File::open("measurements.txt").unwrap();
     let size = file.metadata().unwrap().size() as usize;
-    let mut buf = vec![0; size];
+
+    let chunk_size = 2usize.pow(14);
+    let chunk_count = size.div_ceil(chunk_size);
+    let mut buf = vec![0; chunk_size * chunk_count];
+
+    let mut iovecs: Vec<_> = buf
+        .chunks_exact_mut(chunk_size)
+        .map(|c| IoSliceMut::new(c))
+        .collect();
 
     let mut read = 0;
     while read < size {
-        read += file.read(&mut buf[read..]).unwrap();
+        // Assumption: Chunks are always fully read, or not read at all.
+        // Apart from the last chunk, which may only be partially full, due to the file ending.
+        read += file
+            .read_vectored(&mut iovecs[read / chunk_size..])
+            .unwrap();
     }
     let file = unsafe { String::from_raw_parts(buf.as_mut_ptr(), size, buf.capacity()) };
     let _ = ManuallyDrop::new(buf);
@@ -47,11 +59,12 @@ fn main() {
     }
 
     write!(std::io::stdout(), "{{").unwrap();
-    cities.into_iter().for_each(|(city, s)| {
+    cities.into_iter().enumerate().for_each(|(i, (city, s))| {
         let (min, avg, max) = s.complete();
         write!(
             std::io::stdout(),
-            "\"{city}\": {{\"min\": {min:.1}, \"avg\": {avg:.1}, \"max\": {max:.1}}},",
+            "{}\"{city}\": {{\"min\": {min:.1}, \"avg\": {avg:.1}, \"max\": {max:.1}}}",
+            if i != 0 { "," } else { "" }
         )
         .unwrap();
     });
