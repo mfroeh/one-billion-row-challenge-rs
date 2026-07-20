@@ -9,7 +9,7 @@ use std::{
 };
 
 use fasthash::RandomState;
-use libc::{MAP_FAILED, MAP_PRIVATE, PROT_READ};
+use libc::{MADV_HUGEPAGE, MAP_FAILED, MAP_PRIVATE, PROT_READ};
 
 #[derive(Default)]
 struct Statistics {
@@ -39,6 +39,8 @@ impl Statistics {
     }
 }
 
+const HUGE_PAGE_SIZE: usize = 2usize.pow(21);
+
 fn main() {
     let file = File::open("measurements.txt").unwrap();
     let size = file.metadata().unwrap().size() as usize;
@@ -56,6 +58,13 @@ fn main() {
         if addr == MAP_FAILED {
             panic!("mmap: {}", Error::last_os_error());
         }
+        // But Transparent Huge Pages (THP) are.
+        // This will cause the kernel to allocate huge pages for the region specified by addr and size.
+        // Note that this requires for addr to be huge page size aligned, which experimentally seems to always be the case if you give mmap a null ptr.
+        assert_eq!(addr.addr() % HUGE_PAGE_SIZE, 0);
+        if libc::madvise(addr, size, MADV_HUGEPAGE) == -1 {
+            panic!("madvise: {}", Error::last_os_error());
+        };
         addr.cast::<u8>()
     };
     let mapped_bytes = unsafe { slice::from_raw_parts(map_addr, size) };
