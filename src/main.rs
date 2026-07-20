@@ -1,10 +1,13 @@
 use std::{
     collections::HashMap,
+    ffi::c_void,
     fs::File,
-    io::{IoSliceMut, Read, Write},
-    mem::ManuallyDrop,
-    os::unix::fs::MetadataExt,
+    io::{Error, Write},
+    os::{fd::AsRawFd, unix::fs::MetadataExt},
+    panic, slice,
 };
+
+use libc::{MAP_FAILED, MAP_HUGE_1GB, MAP_PRIVATE, PROT_READ};
 
 #[derive(Default)]
 struct Statistics {
@@ -28,31 +31,28 @@ impl Statistics {
 }
 
 fn main() {
-    let mut file = File::open("measurements.txt").unwrap();
+    let file = File::open("measurements.txt").unwrap();
     let size = file.metadata().unwrap().size() as usize;
 
-    let chunk_size = 2usize.pow(14);
-    let chunk_count = size.div_ceil(chunk_size);
-    let mut buf = vec![0; chunk_size * chunk_count];
-
-    let mut iovecs: Vec<_> = buf
-        .chunks_exact_mut(chunk_size)
-        .map(|c| IoSliceMut::new(c))
-        .collect();
-
-    let mut read = 0;
-    while read < size {
-        // Assumption: Chunks are always fully read, or not read at all.
-        // Apart from the last chunk, which may only be partially full, due to the file ending.
-        read += file
-            .read_vectored(&mut iovecs[read / chunk_size..])
-            .unwrap();
-    }
-    let file = unsafe { String::from_raw_parts(buf.as_mut_ptr(), size, buf.capacity()) };
-    let _ = ManuallyDrop::new(buf);
+    let map_addr = unsafe {
+        let addr = libc::mmap(
+            std::ptr::null_mut::<c_void>(),
+            size,
+            PROT_READ,
+            MAP_PRIVATE | MAP_HUGE_1GB,
+            file.as_raw_fd(),
+            0,
+        );
+        if addr == MAP_FAILED {
+            panic!("mmap: {}", Error::last_os_error());
+        }
+        addr.cast::<u8>()
+    };
+    let mapped_bytes = unsafe { slice::from_raw_parts(map_addr, size) };
+    let string = unsafe { str::from_utf8_unchecked(mapped_bytes) };
 
     let mut cities: HashMap<&str, Statistics> = HashMap::new();
-    for line in file.lines() {
+    for line in string.lines() {
         let (city, temp) = line.split_once(";").unwrap();
         let measurement: f64 = temp.parse().unwrap();
         cities.entry(city).or_default().add(measurement);
