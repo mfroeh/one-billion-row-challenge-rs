@@ -19,3 +19,4 @@ CPU: 9950X3D 32 Hardware Threads @ 4.3/5.7 GHz, RAM: 32GB DDR5 6000 MHz
 3. Vectored Read: `38.26s user 10.21s system 99% cpu 48.581 total`
 4. mmap: `37.54s user 0.81s system 99% cpu 38.383 total`
 5. Parallelize: `71.37s user 3.27s system 2805% cpu 2.661 total`
+6. CityHash64: `76.58s user 0.67s system 2937% cpu 2.630 total`

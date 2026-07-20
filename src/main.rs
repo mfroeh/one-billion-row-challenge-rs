@@ -8,6 +8,7 @@ use std::{
     panic, slice, thread,
 };
 
+use fasthash::RandomState;
 use libc::{MAP_FAILED, MAP_HUGE_1GB, MAP_PRIVATE, PROT_READ};
 
 #[derive(Default)]
@@ -82,9 +83,12 @@ fn main() {
             .into_iter()
             .map(|chunk| {
                 scope.spawn(|| {
-                    let mut cities: HashMap<&str, Statistics> = HashMap::new();
+                    let s = RandomState::new();
+                    let mut cities: HashMap<&str, Statistics, RandomState<fasthash::city::Hash64>> =
+                        HashMap::with_capacity_and_hasher(400, s);
                     for line in string[chunk].lines() {
                         let (city, temp) = line.split_once(";").expect(line);
+
                         let measurement: f64 = temp.parse().unwrap();
                         cities.entry(city).or_default().add(measurement);
                     }
@@ -93,14 +97,19 @@ fn main() {
             })
             .collect();
 
-        let mut merged: HashMap<&str, Statistics> = HashMap::new();
+        let mut merged: Option<HashMap<&str, Statistics, RandomState<fasthash::city::Hash64>>> =
+            None;
         for h in handles {
             let chunk_result = h.join().unwrap();
-            for (k, v) in chunk_result {
-                merged.entry(k).or_default().merge_with(v);
+            if let Some(merged) = merged.as_mut() {
+                for (k, v) in chunk_result {
+                    merged.entry(k).or_default().merge_with(v);
+                }
+            } else {
+                merged = Some(chunk_result)
             }
         }
-        merged
+        merged.unwrap()
     });
 
     write!(std::io::stdout(), "{{").unwrap();
