@@ -15,3 +15,4 @@ CPU: 9950X3D 32 Hardware Threads @ 4.3/5.7 GHz, RAM: 32GB DDR5 6000 MHz
 
 ### Measurements
 1. Naive: `40.18s user 13.71s system 90% cpu 59.279 total`
+2. Assume UTF-8: `38.65s user 9.65s system 99% cpu 48.406 total`

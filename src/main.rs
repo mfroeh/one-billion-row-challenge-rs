@@ -1,4 +1,10 @@
-use std::{collections::HashMap, fs, io::Write};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{Read, Write},
+    mem::ManuallyDrop,
+    os::unix::fs::MetadataExt,
+};
 
 #[derive(Default)]
 struct Statistics {
@@ -22,7 +28,17 @@ impl Statistics {
 }
 
 fn main() {
-    let file = fs::read_to_string("measurements.txt").unwrap();
+    let mut file = File::open("measurements.txt").unwrap();
+    let size = file.metadata().unwrap().size() as usize;
+    let mut buf = vec![0; size];
+
+    let mut read = 0;
+    while read < size {
+        read += file.read(&mut buf[read..]).unwrap();
+    }
+    let file = unsafe { String::from_raw_parts(buf.as_mut_ptr(), size, buf.capacity()) };
+    let _ = ManuallyDrop::new(buf);
+
     let mut cities: HashMap<&str, Statistics> = HashMap::new();
     for line in file.lines() {
         let (city, temp) = line.split_once(";").unwrap();
