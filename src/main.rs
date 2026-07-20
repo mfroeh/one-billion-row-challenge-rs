@@ -130,7 +130,7 @@ fn main() {
                     let mut cities: HashMap<&str, Statistics, RandomState<fasthash::city::Hash64>> =
                         HashMap::with_capacity_and_hasher(400, s);
                     for line in string[chunk].lines() {
-                        let (city, temp) = line.split_once(";").expect(line);
+                        let (city, temp) = line.rsplit_once(";").expect(line);
 
                         let temp = parse_temperature(temp);
                         cities.entry(city).or_default().add(temp);
