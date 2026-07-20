@@ -9,7 +9,7 @@ use std::{
 };
 
 use fasthash::RandomState;
-use libc::{MAP_FAILED, MAP_HUGE_1GB, MAP_PRIVATE, PROT_READ};
+use libc::{MAP_FAILED, MAP_PRIVATE, PROT_READ};
 
 #[derive(Default)]
 struct Statistics {
@@ -48,7 +48,8 @@ fn main() {
             std::ptr::null_mut::<c_void>(),
             size,
             PROT_READ,
-            MAP_PRIVATE | MAP_HUGE_1GB,
+            // MAP_HUGETLB does not seem to be supported on WSL Ubuntu 26.04
+            MAP_PRIVATE,
             file.as_raw_fd(),
             0,
         );
