@@ -21,3 +21,4 @@ CPU: 9950X3D 32 Hardware Threads @ 4.3/5.7 GHz, RAM: 32GB DDR5 6000 MHz
 5. Parallelize: `71.37s user 3.27s system 2805% cpu 2.661 total`
 6. CityHash64: `76.58s user 0.67s system 2937% cpu 2.630 total`
 7. Transparent Huge Pages: `76.30s user 0.11s system 3109% cpu 2.457 total`
+8. f64 -> i32 and manual parsing: `64.16s user 0.17s system 3033% cpu 2.121 total`

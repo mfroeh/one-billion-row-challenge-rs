@@ -13,22 +13,26 @@ use libc::{MADV_HUGEPAGE, MAP_FAILED, MAP_PRIVATE, PROT_READ};
 
 #[derive(Default)]
 struct Statistics {
-    min: f64,
-    sum: f64,
-    max: f64,
+    min: i32,
+    sum: i32,
+    max: i32,
     count: usize,
 }
 
 impl Statistics {
-    fn add(&mut self, measurement: f64) {
-        self.min = self.min.min(measurement);
-        self.max = self.max.max(measurement);
-        self.sum += measurement;
+    fn add(&mut self, temp: i32) {
+        self.min = self.min.min(temp);
+        self.max = self.max.max(temp);
+        self.sum += temp;
         self.count += 1;
     }
 
     fn complete(self) -> (f64, f64, f64) {
-        (self.min, (self.sum / self.count as f64), self.max)
+        (
+            self.min as f64 / 10.0,
+            (self.sum as f64 / 10.0 / self.count as f64),
+            self.max as f64 / 10.0,
+        )
     }
 
     fn merge_with(&mut self, other: Statistics) {
@@ -40,6 +44,35 @@ impl Statistics {
 }
 
 const HUGE_PAGE_SIZE: usize = 2usize.pow(21);
+
+fn parse_temperature(from: &str) -> i32 {
+    let from = from.as_bytes();
+
+    let neg = from[0] == '-' as u8;
+    if neg {
+        let mut n: i32 = (from[1] - '0' as u8) as i32;
+        n *= 10;
+        if from[2] == '.' as u8 {
+            n += (from[3] - '0' as u8) as i32;
+        } else {
+            n += (from[2] - '0' as u8) as i32;
+            n *= 10;
+            n += (from[4] - '0' as u8) as i32;
+        }
+        -n
+    } else {
+        let mut n: i32 = (from[0] - '0' as u8) as i32;
+        n *= 10;
+        if from[1] == '.' as u8 {
+            n += (from[2] - '0' as u8) as i32;
+        } else {
+            n += (from[1] - '0' as u8) as i32;
+            n *= 10;
+            n += (from[3] - '0' as u8) as i32;
+        }
+        n
+    }
+}
 
 fn main() {
     let file = File::open("measurements.txt").unwrap();
@@ -88,7 +121,7 @@ fn main() {
     // last chunk gets the remainder of the work
     chunks.last_mut().unwrap().end = size;
 
-    let cities = thread::scope(|scope| {
+    let merged = thread::scope(|scope| {
         let handles: Vec<_> = chunks
             .into_iter()
             .map(|chunk| {
@@ -99,8 +132,8 @@ fn main() {
                     for line in string[chunk].lines() {
                         let (city, temp) = line.split_once(";").expect(line);
 
-                        let measurement: f64 = temp.parse().unwrap();
-                        cities.entry(city).or_default().add(measurement);
+                        let temp = parse_temperature(temp);
+                        cities.entry(city).or_default().add(temp);
                     }
                     cities
                 })
@@ -119,19 +152,23 @@ fn main() {
                 merged = Some(chunk_result)
             }
         }
-        merged.unwrap()
+        merged
     });
 
     write!(std::io::stdout(), "{{").unwrap();
-    cities.into_iter().enumerate().for_each(|(i, (city, s))| {
-        let (min, avg, max) = s.complete();
-        write!(
-            std::io::stdout(),
-            "{}\"{city}\": {{\"min\": {min:.1}, \"avg\": {avg:.1}, \"max\": {max:.1}}}",
-            if i != 0 { "," } else { "" }
-        )
-        .unwrap();
-    });
+    merged
+        .unwrap()
+        .into_iter()
+        .enumerate()
+        .for_each(|(i, (city, s))| {
+            let (min, avg, max) = s.complete();
+            write!(
+                std::io::stdout(),
+                "{}\"{city}\": {{\"min\": {min:.1}, \"avg\": {avg:.1}, \"max\": {max:.1}}}",
+                if i != 0 { "," } else { "" }
+            )
+            .unwrap();
+        });
     write!(std::io::stdout(), "}}").unwrap();
     std::io::stdout().flush().unwrap();
 }
