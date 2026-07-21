@@ -45,9 +45,7 @@ impl Statistics {
 
 const HUGE_PAGE_SIZE: usize = 2usize.pow(21);
 
-fn parse_temperature(from: &str) -> i32 {
-    let from = from.as_bytes();
-
+fn parse_temperature(from: &[u8]) -> i32 {
     let neg = from[0] == '-' as u8;
     if neg {
         let mut n: i32 = (from[1] - '0' as u8) as i32;
@@ -76,7 +74,10 @@ fn parse_temperature(from: &str) -> i32 {
 
 fn main() {
     let file = File::open("measurements.txt").unwrap();
-    let size = file.metadata().unwrap().size() as usize;
+    // We get rid off the trailing LF char (0x0a == '\n' as u8), to avoid the split() yielding an empty slice,
+    // and thus get rid off one branch (this branch is roughly 100ms, since this is such a tight loop).
+    // Useful to see if a file has a trailing LF: `tail measurements.txt | xxd`
+    let size = file.metadata().unwrap().size() as usize - 1;
 
     let map_addr = unsafe {
         let addr = libc::mmap(
@@ -127,20 +128,31 @@ fn main() {
             .map(|chunk| {
                 scope.spawn(|| {
                     let s = RandomState::new();
-                    let mut cities: HashMap<&str, Statistics, RandomState<fasthash::city::Hash64>> =
-                        HashMap::with_capacity_and_hasher(400, s);
-                    for line in string[chunk].lines() {
-                        let (city, temp) = line.rsplit_once(";").expect(line);
+                    let mut cities: HashMap<
+                        &[u8],
+                        Statistics,
+                        RandomState<fasthash::city::Hash64>,
+                    > = HashMap::with_capacity_and_hasher(400, s);
+                    for line in string[chunk].as_bytes().split(|&b| b == '\n' as u8) {
+                        let len = line.len();
+                        // Luanda;6.0
+                        let split_at = if line[len - 4] == ';' as u8 {
+                            len - 4
+                        } else if line[len - 5] == ';' as u8 {
+                            len - 5
+                        } else {
+                            len - 6
+                        };
 
-                        let temp = parse_temperature(temp);
-                        cities.entry(city).or_default().add(temp);
+                        let temp = parse_temperature(&line[split_at + 1..]);
+                        cities.entry(&line[..split_at]).or_default().add(temp);
                     }
                     cities
                 })
             })
             .collect();
 
-        let mut merged: Option<HashMap<&str, Statistics, RandomState<fasthash::city::Hash64>>> =
+        let mut merged: Option<HashMap<&[u8], Statistics, RandomState<fasthash::city::Hash64>>> =
             None;
         for h in handles {
             let chunk_result = h.join().unwrap();
@@ -162,6 +174,7 @@ fn main() {
         .enumerate()
         .for_each(|(i, (city, s))| {
             let (min, avg, max) = s.complete();
+            let city = unsafe { str::from_utf8_unchecked(city) };
             write!(
                 std::io::stdout(),
                 "{}\"{city}\": {{\"min\": {min:.1}, \"avg\": {avg:.1}, \"max\": {max:.1}}}",
