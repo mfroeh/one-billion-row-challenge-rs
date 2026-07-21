@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     ffi::c_void,
     fs::File,
     io::{Error, Write},
@@ -8,8 +7,8 @@ use std::{
     panic, slice, thread,
 };
 
-use fasthash::RandomState;
 use libc::{MADV_HUGEPAGE, MAP_FAILED, MAP_PRIVATE, PROT_READ};
+use rustc_hash::{FxBuildHasher, FxHashMap};
 
 #[derive(Default)]
 struct Statistics {
@@ -127,12 +126,8 @@ fn main() {
             .into_iter()
             .map(|chunk| {
                 scope.spawn(|| {
-                    let s = RandomState::new();
-                    let mut cities: HashMap<
-                        &[u8],
-                        Statistics,
-                        RandomState<fasthash::city::Hash64>,
-                    > = HashMap::with_capacity_and_hasher(400, s);
+                    let mut cities: FxHashMap<&[u8], Statistics> =
+                        FxHashMap::with_capacity_and_hasher(400, FxBuildHasher);
                     for line in string[chunk].as_bytes().split(|&b| b == '\n' as u8) {
                         let len = line.len();
                         // Luanda;6.0
@@ -152,8 +147,7 @@ fn main() {
             })
             .collect();
 
-        let mut merged: Option<HashMap<&[u8], Statistics, RandomState<fasthash::city::Hash64>>> =
-            None;
+        let mut merged: Option<FxHashMap<&[u8], Statistics>> = None;
         for h in handles {
             let chunk_result = h.join().unwrap();
             if let Some(merged) = merged.as_mut() {

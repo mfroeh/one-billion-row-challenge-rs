@@ -24,3 +24,4 @@ CPU: 9950X3D 32 Hardware Threads @ 4.3/5.7 GHz, RAM: 32GB DDR5 6000 MHz
 8. f64 -> i32 and manual parsing: `64.16s user 0.17s system 3033% cpu 2.121 total`
 9. rsplit_once: `61.57s user 0.20s system 3020% cpu 2.045 total`
 10. `&[u8]` instead of `&str`: `41.76s user 0.10s system 3036% cpu 1.379 total`
+11. FxHashMap: `23.25s user 0.33s system 2691% cpu 0.876 total`
