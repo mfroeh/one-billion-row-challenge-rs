@@ -73,10 +73,7 @@ fn parse_temperature(from: &[u8]) -> i32 {
 
 fn main() {
     let file = File::open("measurements.txt").unwrap();
-    // We get rid off the trailing LF char (0x0a == '\n' as u8), to avoid the split() yielding an empty slice,
-    // and thus get rid off one branch (this branch is roughly 100ms, since this is such a tight loop).
-    // Useful to see if a file has a trailing LF: `tail measurements.txt | xxd`
-    let size = file.metadata().unwrap().size() as usize - 1;
+    let size = file.metadata().unwrap().size() as usize;
 
     let map_addr = unsafe {
         let addr = libc::mmap(
@@ -110,12 +107,10 @@ fn main() {
     let mut start = 0;
     for _ in 0..chunk_count {
         let exact_end = string.ceil_char_boundary(start + chunk_size);
-        let end = string[exact_end..]
-            .find('\n')
-            .map(|e| e + exact_end)
-            // it is always possible that exact_end hits the very last line
-            .unwrap_or(size);
-        chunks.push(start..end);
+        // For the last chunk, it is possible that exact_end == size - 1.
+        let end = exact_end
+            + memchr::memchr('\n' as u8, string[exact_end..].as_bytes()).unwrap_or(size - 1);
+        chunks.push(start..end + 1);
         start = end + 1;
     }
     // last chunk gets the remainder of the work
@@ -126,9 +121,15 @@ fn main() {
             .into_iter()
             .map(|chunk| {
                 scope.spawn(|| {
+                    let chunk = string[chunk].as_bytes();
                     let mut cities: FxHashMap<&[u8], Statistics> =
                         FxHashMap::with_capacity_and_hasher(400, FxBuildHasher);
-                    for line in string[chunk].as_bytes().split(|&b| b == '\n' as u8) {
+
+                    let mut line_start = 0;
+                    for line_end in memchr::memchr_iter('\n' as u8, chunk) {
+                        let line = &chunk[line_start..line_end];
+                        line_start = line_end + 1;
+
                         let len = line.len();
                         // Luanda;6.0
                         let split_at = if line[len - 4] == ';' as u8 {
