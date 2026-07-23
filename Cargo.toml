@@ -3,6 +3,10 @@ name = "one-billion-row-challenge-rs"
 version = "0.1.0"
 edition = "2024"
 
+[profile.profiling]
+inherits = "release"
+debug = true
+
 [dependencies]
 libc = "0.2.186"
 memchr = "2.8.3"

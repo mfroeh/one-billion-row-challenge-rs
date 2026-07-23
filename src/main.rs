@@ -71,6 +71,47 @@ fn parse_temperature(from: &[u8]) -> i32 {
     }
 }
 
+fn process_chunk(chunk: &[u8]) -> FxHashMap<&[u8], Statistics> {
+    let mut cities: FxHashMap<&[u8], Statistics> =
+        FxHashMap::with_capacity_and_hasher(400, FxBuildHasher);
+
+    let mut line_start = 0;
+    for line_end in memchr::memchr_iter('\n' as u8, chunk) {
+        let line = &chunk[line_start..line_end];
+        line_start = line_end + 1;
+
+        let len = line.len();
+        // Luanda;6.0
+        let split_at = if line[len - 4] == ';' as u8 {
+            len - 4
+        } else if line[len - 5] == ';' as u8 {
+            len - 5
+        } else {
+            len - 6
+        };
+
+        let temp = parse_temperature(&line[split_at + 1..]);
+        cities.entry(&line[..split_at]).or_default().add(temp);
+    }
+    cities
+}
+
+fn write_result(result: FxHashMap<&[u8], Statistics>) {
+    write!(std::io::stdout(), "{{").unwrap();
+    result.into_iter().enumerate().for_each(|(i, (city, s))| {
+        let (min, avg, max) = s.complete();
+        let city = unsafe { str::from_utf8_unchecked(city) };
+        write!(
+            std::io::stdout(),
+            "{}\"{city}\": {{\"min\": {min:.1}, \"avg\": {avg:.1}, \"max\": {max:.1}}}",
+            if i != 0 { "," } else { "" }
+        )
+        .unwrap();
+    });
+    write!(std::io::stdout(), "}}").unwrap();
+    std::io::stdout().flush().unwrap();
+}
+
 fn main() {
     let file = File::open("measurements.txt").unwrap();
     let size = file.metadata().unwrap().size() as usize;
@@ -103,7 +144,7 @@ fn main() {
     let chunk_count: usize = thread::available_parallelism().unwrap().get();
     let chunk_size = size / chunk_count;
 
-    let mut chunks: Vec<Range<usize>> = Vec::new();
+    let mut chunks: Vec<Range<usize>> = Vec::with_capacity(chunk_count);
     let mut start = 0;
     for _ in 0..chunk_count {
         let exact_end = string.ceil_char_boundary(start + chunk_size);
@@ -120,31 +161,8 @@ fn main() {
         let handles: Vec<_> = chunks
             .into_iter()
             .map(|chunk| {
-                scope.spawn(|| {
-                    let chunk = string[chunk].as_bytes();
-                    let mut cities: FxHashMap<&[u8], Statistics> =
-                        FxHashMap::with_capacity_and_hasher(400, FxBuildHasher);
-
-                    let mut line_start = 0;
-                    for line_end in memchr::memchr_iter('\n' as u8, chunk) {
-                        let line = &chunk[line_start..line_end];
-                        line_start = line_end + 1;
-
-                        let len = line.len();
-                        // Luanda;6.0
-                        let split_at = if line[len - 4] == ';' as u8 {
-                            len - 4
-                        } else if line[len - 5] == ';' as u8 {
-                            len - 5
-                        } else {
-                            len - 6
-                        };
-
-                        let temp = parse_temperature(&line[split_at + 1..]);
-                        cities.entry(&line[..split_at]).or_default().add(temp);
-                    }
-                    cities
-                })
+                let chunk = string[chunk].as_bytes();
+                scope.spawn(|| process_chunk(chunk))
             })
             .collect();
 
@@ -162,21 +180,5 @@ fn main() {
         merged
     });
 
-    write!(std::io::stdout(), "{{").unwrap();
-    merged
-        .unwrap()
-        .into_iter()
-        .enumerate()
-        .for_each(|(i, (city, s))| {
-            let (min, avg, max) = s.complete();
-            let city = unsafe { str::from_utf8_unchecked(city) };
-            write!(
-                std::io::stdout(),
-                "{}\"{city}\": {{\"min\": {min:.1}, \"avg\": {avg:.1}, \"max\": {max:.1}}}",
-                if i != 0 { "," } else { "" }
-            )
-            .unwrap();
-        });
-    write!(std::io::stdout(), "}}").unwrap();
-    std::io::stdout().flush().unwrap();
+    write_result(merged.unwrap());
 }
