@@ -8,14 +8,19 @@ use std::{
 };
 
 use libc::{MADV_HUGEPAGE, MAP_FAILED, MAP_PRIVATE, PROT_READ};
-use rustc_hash::{FxBuildHasher, FxHashMap};
+use ptr_hash::{
+    FastPtrHash, PtrHash, PtrHashParams,
+    bucket_fn::{self},
+    hash::FastIntHash,
+};
+use rustc_hash::{FxBuildHasher, FxHashSet};
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 struct Statistics {
     min: i32,
     sum: i32,
     max: i32,
-    count: usize,
+    count: u32,
 }
 
 impl Statistics {
@@ -71,35 +76,44 @@ fn parse_temperature(from: &[u8]) -> i32 {
     }
 }
 
-fn process_chunk(chunk: &[u8]) -> FxHashMap<&[u8], Statistics> {
-    let mut cities: FxHashMap<&[u8], Statistics> =
-        FxHashMap::with_capacity_and_hasher(400, FxBuildHasher);
+#[inline]
+fn position_semi(line: &[u8]) -> usize {
+    let len = line.len();
+    // Luanda;6.0
+    if line[len - 4] == ';' as u8 {
+        len - 4
+    } else if line[len - 5] == ';' as u8 {
+        len - 5
+    } else {
+        len - 6
+    }
+}
 
+fn process_chunk(
+    chunk: &[u8],
+    phf: &PtrHash<&[u8], bucket_fn::Linear, Vec<u32>, FastIntHash, Vec<u8>, true, false>,
+) -> Vec<Statistics> {
+    let mut cities: Vec<Statistics> = vec![Statistics::default(); phf.max_index()];
     let mut line_start = 0;
     for line_end in memchr::memchr_iter('\n' as u8, chunk) {
         let line = &chunk[line_start..line_end];
         line_start = line_end + 1;
-
-        let len = line.len();
-        // Luanda;6.0
-        let split_at = if line[len - 4] == ';' as u8 {
-            len - 4
-        } else if line[len - 5] == ';' as u8 {
-            len - 5
-        } else {
-            len - 6
-        };
-
+        let split_at = position_semi(line);
         let temp = parse_temperature(&line[split_at + 1..]);
-        cities.entry(&line[..split_at]).or_default().add(temp);
+        let city = &line[..split_at];
+        cities[phf.index(&city)].add(temp);
     }
     cities
 }
 
-fn write_result(result: FxHashMap<&[u8], Statistics>) {
+fn write_result(
+    result: Vec<Statistics>,
+    cities: Vec<&[u8]>,
+    phf: PtrHash<&[u8], bucket_fn::Linear, Vec<u32>, FastIntHash, Vec<u8>, true, false>,
+) {
     write!(std::io::stdout(), "{{").unwrap();
-    result.into_iter().enumerate().for_each(|(i, (city, s))| {
-        let (min, avg, max) = s.complete();
+    cities.into_iter().enumerate().for_each(|(i, city)| {
+        let (min, avg, max) = result[phf.index(&city)].complete();
         let city = unsafe { str::from_utf8_unchecked(city) };
         write!(
             std::io::stdout(),
@@ -157,28 +171,36 @@ fn main() {
     // last chunk gets the remainder of the work
     chunks.last_mut().unwrap().end = size;
 
+    let mut cities = FxHashSet::with_capacity_and_hasher(1000, FxBuildHasher);
+    let mut line_start = 0;
+    let string: &[u8] = string.as_bytes();
+    for line_end in memchr::memchr_iter('\n' as u8, string).take(10000) {
+        let line = &string[line_start..line_end];
+        line_start = line_end + 1;
+
+        let city_end = position_semi(line);
+        cities.insert(&line[..city_end]);
+    }
+    let cities = cities.into_iter().collect::<Vec<_>>();
+
+    let phf: PtrHash<&[u8], bucket_fn::Linear, Vec<u32>, FastIntHash, Vec<u8>, true, false> =
+        FastPtrHash::new(&cities, PtrHashParams::default_fast());
+
     let merged = thread::scope(|scope| {
         let handles: Vec<_> = chunks
             .into_iter()
-            .map(|chunk| {
-                let chunk = string[chunk].as_bytes();
-                scope.spawn(|| process_chunk(chunk))
-            })
+            .map(|chunk| scope.spawn(|| process_chunk(&string[chunk], &phf)))
             .collect();
 
-        let mut merged: Option<FxHashMap<&[u8], Statistics>> = None;
+        let mut merged = vec![Statistics::default(); phf.max_index()];
         for h in handles {
             let chunk_result = h.join().unwrap();
-            if let Some(merged) = merged.as_mut() {
-                for (k, v) in chunk_result {
-                    merged.entry(k).or_default().merge_with(v);
-                }
-            } else {
-                merged = Some(chunk_result)
+            for i in 0..phf.max_index() {
+                merged[i].merge_with(chunk_result[i]);
             }
         }
         merged
     });
 
-    write_result(merged.unwrap());
+    write_result(merged, cities, phf);
 }
