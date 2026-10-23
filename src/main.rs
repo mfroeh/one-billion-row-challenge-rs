@@ -1,3 +1,4 @@
+#![feature(default_field_values)]
 use std::{
     ffi::c_void,
     fs::File,
@@ -12,9 +13,9 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 
 #[derive(Default)]
 struct Statistics {
-    min: i32,
+    min: i32 = i32::MAX,
+    max: i32 = i32::MIN,
     sum: i32,
-    max: i32,
     count: usize,
 }
 
