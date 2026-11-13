@@ -2,7 +2,7 @@
 CPU: 9950X3D 32 Hardware Threads @ 4.3/5.7 GHz, RAM: 32GB DDR5 6000 MHz 
 
 ## Rules of the original challenge
-1. No external library dependencies may be used
+1. ~No external library dependencies may be used~ We allow using dependencies
 2. Implementations must be provided as a single source file
 3. The computation must happen at application runtime, i.e. you cannot process the measurements file at build time (for instance, when using GraalVM) and just bake the result into the binary
 4. Input value ranges are as follows:
