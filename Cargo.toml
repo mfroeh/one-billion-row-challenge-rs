@@ -1,5 +1,5 @@
 [package]
-name = "one-billion-row-challenge-rs"
+name = "one-billion-row-challenge"
 version = "0.1.0"
 edition = "2024"
 
@@ -10,6 +10,8 @@ debug = true
 [dependencies]
 libc = "0.2.186"
 memchr = "2.8.3"
+rand = "0.10.4"
+rand_distr = "0.6.0"
 rustc-hash = { version = "2.1.3" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.150"
@@ -17,3 +19,7 @@ serde_json = "1.0.150"
 [[bin]]
 name = "verify"
 path = "bin/verify.rs"
+
+[[bin]]
+name = "generate"
+path = "bin/generate.rs"
