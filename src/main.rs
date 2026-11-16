@@ -2,7 +2,7 @@
 use std::{
     ffi::c_void,
     fs::File,
-    io::{Error, Write},
+    io::Error,
     ops::Range,
     os::{fd::AsRawFd, unix::fs::MetadataExt},
     panic, slice, thread,
@@ -15,7 +15,7 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 struct Statistics {
     min: i32 = i32::MAX,
     max: i32 = i32::MIN,
-    sum: i32,
+    sum: i64,
     count: usize,
 }
 
@@ -23,7 +23,7 @@ impl Statistics {
     fn add(&mut self, temp: i32) {
         self.min = self.min.min(temp);
         self.max = self.max.max(temp);
-        self.sum += temp;
+        self.sum += temp as i64;
         self.count += 1;
     }
 
@@ -46,27 +46,27 @@ impl Statistics {
 const HUGE_PAGE_SIZE: usize = 2usize.pow(21);
 
 fn parse_temperature(from: &[u8]) -> i32 {
-    let neg = from[0] == '-' as u8;
+    let neg = from[0] == b'-';
     if neg {
-        let mut n: i32 = (from[1] - '0' as u8) as i32;
+        let mut n: i32 = (from[1] - b'0') as i32;
         n *= 10;
-        if from[2] == '.' as u8 {
-            n += (from[3] - '0' as u8) as i32;
+        if from[2] == b'.' {
+            n += (from[3] - b'0') as i32;
         } else {
-            n += (from[2] - '0' as u8) as i32;
+            n += (from[2] - b'0') as i32;
             n *= 10;
-            n += (from[4] - '0' as u8) as i32;
+            n += (from[4] - b'0') as i32;
         }
         -n
     } else {
-        let mut n: i32 = (from[0] - '0' as u8) as i32;
+        let mut n: i32 = (from[0] - b'0') as i32;
         n *= 10;
-        if from[1] == '.' as u8 {
-            n += (from[2] - '0' as u8) as i32;
+        if from[1] == b'.' {
+            n += (from[2] - b'0') as i32;
         } else {
-            n += (from[1] - '0' as u8) as i32;
+            n += (from[1] - b'0') as i32;
             n *= 10;
-            n += (from[3] - '0' as u8) as i32;
+            n += (from[3] - b'0') as i32;
         }
         n
     }
@@ -77,15 +77,15 @@ fn process_chunk(chunk: &[u8]) -> FxHashMap<&[u8], Statistics> {
         FxHashMap::with_capacity_and_hasher(400, FxBuildHasher);
 
     let mut line_start = 0;
-    for line_end in memchr::memchr_iter('\n' as u8, chunk) {
+    for line_end in memchr::memchr_iter(b'\n', chunk) {
         let line = &chunk[line_start..line_end];
         line_start = line_end + 1;
 
         let len = line.len();
         // Luanda;6.0
-        let split_at = if line[len - 4] == ';' as u8 {
+        let split_at = if line[len - 4] == b';' {
             len - 4
-        } else if line[len - 5] == ';' as u8 {
+        } else if line[len - 5] == b';' {
             len - 5
         } else {
             len - 6
@@ -97,20 +97,28 @@ fn process_chunk(chunk: &[u8]) -> FxHashMap<&[u8], Statistics> {
     cities
 }
 
+// Java's Math.Round, which rounds towards positive infinity.
+fn round(v: f64) -> f64 {
+    (v + 0.5).floor()
+}
+
 fn write_result(result: FxHashMap<&[u8], Statistics>) {
-    write!(std::io::stdout(), "{{").unwrap();
-    result.into_iter().enumerate().for_each(|(i, (city, s))| {
-        let (min, avg, max) = s.complete();
+    print!("{{");
+    for (i, (city, s)) in result.into_iter().enumerate() {
         let city = unsafe { str::from_utf8_unchecked(city) };
-        write!(
-            std::io::stdout(),
-            "{}\"{city}\": {{\"min\": {min:.1}, \"avg\": {avg:.1}, \"max\": {max:.1}}}",
-            if i != 0 { "," } else { "" }
-        )
-        .unwrap();
-    });
-    write!(std::io::stdout(), "}}").unwrap();
-    std::io::stdout().flush().unwrap();
+        let (min, mean, max) = s.complete();
+        let (min, mean, max) = (
+            round(min * 10.0) / 10.0,
+            round(mean * 10.0) / 10.0,
+            round(max * 10.0) / 10.0,
+        );
+        if i == 0 {
+            print!("{city}={min:.1}/{mean:.1}/{max:.1}");
+        } else {
+            print!(", {city}={min:.1}/{mean:.1}/{max:.1}");
+        }
+    }
+    print!("}}");
 }
 
 fn main() {
@@ -150,8 +158,8 @@ fn main() {
     for _ in 0..chunk_count {
         let exact_end = string.ceil_char_boundary(start + chunk_size);
         // For the last chunk, it is possible that exact_end == size - 1.
-        let end = exact_end
-            + memchr::memchr('\n' as u8, string[exact_end..].as_bytes()).unwrap_or(size - 1);
+        let end =
+            exact_end + memchr::memchr(b'\n', &string.as_bytes()[exact_end..]).unwrap_or(size - 1);
         chunks.push(start..end + 1);
         start = end + 1;
     }
